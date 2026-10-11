@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: orbit-ai-operations-agent
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DEMO_MODE
+        value: "true"
+      - key: DATABASE_URL
+        value: sqlite:////var/data/orbit.db
