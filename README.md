@@ -1,5 +1,7 @@
 # Orbit AI — Intelligent Operations Agent
 
+> Repository: **Orbit-I**
+
 Orbit AI turns plain-language operations requests into reviewable task, reminder, and workflow plans. It is a FastAPI + SQLite backend paired with a responsive React/Vite dashboard, created for the TriCity AI Hackathon.
 
 ## Quick start on Windows
