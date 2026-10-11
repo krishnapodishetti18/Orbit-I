@@ -1,10 +1,21 @@
 import os
+from pathlib import Path
 os.environ["DATABASE_URL"]="sqlite:///./test_orbit.db"
 from fastapi.testclient import TestClient
 from backend.main import app, Base, engine
+from backend.main import resolve_database_url
 
 Base.metadata.drop_all(engine); Base.metadata.create_all(engine)
 client=TestClient(app)
+
+def test_sqlite_database_directory_is_created(tmp_path):
+    database_file = tmp_path / 'persistent-data' / 'orbit.db'
+    resolved = resolve_database_url(f"sqlite:///{database_file.as_posix()}")
+    assert Path(make_sqlite_path(resolved)).parent == database_file.parent
+    assert database_file.parent.is_dir()
+
+def make_sqlite_path(database_url):
+    return database_url.removeprefix('sqlite:///')
 
 def headers():
     response = client.post('/auth/register', json={'name':'Test User','email':'test@example.com','password':'SecurePass123'})

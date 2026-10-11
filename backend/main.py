@@ -1,9 +1,11 @@
 import json
 import os
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -14,10 +16,33 @@ from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, func
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./orbit.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
+logger = logging.getLogger("orbit.database")
+
+def resolve_database_url(raw_url: str) -> str:
+    """Resolve SQLite file URLs and provision their directory before connecting."""
+    url = make_url(raw_url)
+    if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:":
+        return raw_url
+    database_path = Path(url.database).expanduser()
+    if not database_path.is_absolute():
+        database_path = (Path.cwd() / database_path).resolve()
+    try:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        logger.exception("Could not create the SQLite database directory")
+        raise RuntimeError("Database directory is unavailable; verify DATABASE_URL and the mounted disk path") from error
+    return str(url.set(database=str(database_path)))
+
+DATABASE_URL = resolve_database_url(os.getenv("DATABASE_URL", "sqlite:///./orbit.db"))
+try:
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
+except SQLAlchemyError as error:
+    logger.exception("Could not create the database engine")
+    raise RuntimeError("Database engine creation failed; verify DATABASE_URL") from error
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase): pass
@@ -149,11 +174,15 @@ app=FastAPI(title="Orbit AI API",version="1.0.0")
 app.add_middleware(CORSMiddleware,allow_origins=os.getenv("CORS_ORIGINS","http://localhost:5173,http://127.0.0.1:5173").split(","),allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 @app.on_event("startup")
 def start():
-    Base.metadata.create_all(engine)
-    if DATABASE_URL.startswith("sqlite"):
-        with engine.begin() as connection:
-            columns = [row[1] for row in connection.exec_driver_sql("PRAGMA table_info(users)")]
-            if "password_hash" not in columns: connection.exec_driver_sql("ALTER TABLE users ADD COLUMN password_hash VARCHAR DEFAULT ''")
+    try:
+        Base.metadata.create_all(engine)
+        if DATABASE_URL.startswith("sqlite"):
+            with engine.begin() as connection:
+                columns = [row[1] for row in connection.exec_driver_sql("PRAGMA table_info(users)")]
+                if "password_hash" not in columns: connection.exec_driver_sql("ALTER TABLE users ADD COLUMN password_hash VARCHAR DEFAULT ''")
+    except SQLAlchemyError as error:
+        logger.exception("Database initialization failed. Verify DATABASE_URL and writable storage.")
+        raise RuntimeError("Database initialization failed; see server logs for DATABASE_URL storage guidance") from error
     scheduler=BackgroundScheduler(); scheduler.start()
 @app.get("/health")
 def health(): return {"ok":True,"demo_mode":os.getenv("DEMO_MODE","true").lower()=="true"}

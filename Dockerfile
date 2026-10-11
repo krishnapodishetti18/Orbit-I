@@ -11,6 +11,7 @@ COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend ./backend
 COPY --from=frontend /app/frontend/dist ./frontend/dist
+RUN mkdir -p /var/data
 WORKDIR /app/backend
 ENV DATABASE_URL=sqlite:////var/data/orbit.db
 ENV PORT=10000
